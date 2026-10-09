@@ -25,6 +25,22 @@ if "user_info" not in st.session_state:
 if "import_pending" not in st.session_state:
     st.session_state["import_pending"] = None
 
+def clean_record_for_json(record):
+    """Manadio ny valeur NaN na Float invalide ho None ara-dalana amin'ny JSON/Supabase"""
+    cleaned = {}
+    for k, v in record.items():
+        if pd.isna(v) or v is None:
+            cleaned[k] = None
+        elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            cleaned[k] = None
+        elif isinstance(v, (int, np.integer)):
+            cleaned[k] = int(v)
+        elif isinstance(v, (float, np.floating)):
+            cleaned[k] = float(v)
+        else:
+            cleaned[k] = str(v)
+    return cleaned
+
 def login():
     st.title("🔐 Projet SBI - Pejy fidirana")
     st.subheader("Mampidira ny IM sy ny Mot de passe")
@@ -105,7 +121,7 @@ def main_app():
             if not df_btt.empty:
                 st.dataframe(df_btt, use_container_width=True)
             else:
-                st.info(f"Mbola tsy misy angona BTT ho an'ny UO {user_uo_id} aloha hatreto.")
+                st.info(f"Mbolatsy misy angona BTT ho an'ny UO {user_uo_id} aloha hatreto.")
 
         # 2. Ampiakatra Fichier Excel
         with sub_tab2:
@@ -156,7 +172,7 @@ def main_app():
                         if df_user_data.empty:
                             st.warning(f"⚠️ Tsy misy ID_UO = {user_uo_id} sy UO ao anatin'ilay fichier emporté-na!")
                         else:
-                            st.success(f"Hita ao anaty fichier: Android/Andalana {len(df_user_data)} mifanaraka amin'ny UO = {user_uo_id}")
+                            st.success(f"Hita ao anaty fichier: Andalana {len(df_user_data)} mifanaraka amin'ny UO = {user_uo_id}")
                             st.dataframe(df_user_data.head(), use_container_width=True)
 
                             if st.button("🚀 Hanomboka ny Importation", key="btn_check_import"):
@@ -165,8 +181,15 @@ def main_app():
                                     if d_col in df_user_data.columns:
                                         df_user_data[d_col] = pd.to_datetime(df_user_data[d_col], errors='coerce').dt.strftime('%Y-%m-%d')
 
-                                df_user_data = df_user_data.where(pd.notnull(df_user_data), None)
-                                records = df_user_data.to_dict(orient="records")
+                                # Convert numeric columns explicitly
+                                num_cols = ["annee", "numeraire_espece", "cheque", "virement", "btt_total", "btt_cumul"]
+                                for nc in num_cols:
+                                    if nc in df_user_data.columns:
+                                        df_user_data[nc] = pd.to_numeric(df_user_data[nc], errors='coerce')
+
+                                # Clean records explicitly for JSON compliance
+                                raw_records = df_user_data.to_dict(orient="records")
+                                records = [clean_record_for_json(r) for r in raw_records]
 
                                 # 2. Check for Existing Data in Supabase (ID_UO, Année, Mois)
                                 existing_criteria = []
@@ -176,7 +199,7 @@ def main_app():
                                     annee_val = r.get("annee")
                                     mois_val = r.get("mois")
 
-                                    if annee_val and mois_val:
+                                    if annee_val is not None and mois_val is not None:
                                         check_res = supabase.table("btt").select("id")\
                                             .eq("uo_id", user_uo_id)\
                                             .eq("annee", int(annee_val))\
@@ -190,13 +213,12 @@ def main_app():
                                                 existing_criteria.append(crit)
 
                                 if conflicts_found:
-                                    # Store pending state to prompt the user
                                     st.session_state["import_pending"] = {
                                         "records": records,
                                         "existing_criteria": existing_criteria
                                     }
+                                    st.rerun()
                                 else:
-                                    # Pure Insert
                                     execute_btt_insert(records, user_uo_id, action="insert")
 
                 except Exception as e:
