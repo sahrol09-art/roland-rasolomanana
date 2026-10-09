@@ -26,11 +26,30 @@ if "import_pending" not in st.session_state:
     st.session_state["import_pending"] = None
 
 def clean_record_for_json(record):
-    """Manadio ny valeur NaN na Float invalide ho None ara-dalana amin'ny JSON/Supabase"""
+    """Manadio ny valeur NaN, float invalide, ary mampifanaraka ny type integer/string ho an'ny Supabase"""
     cleaned = {}
+    
+    # Ireo columna tokony ho INTEGER tsotra ao amin'ny Supabase
+    int_cols = ["annee", "num_btt"]
+    
     for k, v in record.items():
         if pd.isna(v) or v is None:
             cleaned[k] = None
+        elif k in int_cols:
+            try:
+                # Ansorahana ilay decimal .0 vokatry ny pandas float conversion
+                cleaned[k] = int(float(v))
+            except (ValueError, TypeError):
+                cleaned[k] = None
+        elif k == "mois":
+            # Raha ohatra ka integer na float ny mois ao anaty excel (oh: 1 na 1.0) dia avadika ho text madio "1"
+            if isinstance(v, (float, int, np.number)):
+                try:
+                    cleaned[k] = str(int(float(v)))
+                except (ValueError, TypeError):
+                    cleaned[k] = str(v)
+            else:
+                cleaned[k] = str(v).strip()
         elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
             cleaned[k] = None
         elif isinstance(v, (int, np.integer)):
@@ -38,7 +57,8 @@ def clean_record_for_json(record):
         elif isinstance(v, (float, np.floating)):
             cleaned[k] = float(v)
         else:
-            cleaned[k] = str(v)
+            cleaned[k] = str(v).strip()
+            
     return cleaned
 
 def login():
@@ -121,7 +141,7 @@ def main_app():
             if not df_btt.empty:
                 st.dataframe(df_btt, use_container_width=True)
             else:
-                st.info(f"Mbolatsy misy angona BTT ho an'ny UO {user_uo_id} aloha hatreto.")
+                st.info(f"Mbola tsy misy angona BTT ho an'ny UO {user_uo_id} aloha hatreto.")
 
         # 2. Ampiakatra Fichier Excel
         with sub_tab2:
@@ -181,13 +201,7 @@ def main_app():
                                     if d_col in df_user_data.columns:
                                         df_user_data[d_col] = pd.to_datetime(df_user_data[d_col], errors='coerce').dt.strftime('%Y-%m-%d')
 
-                                # Convert numeric columns explicitly
-                                num_cols = ["annee", "numeraire_espece", "cheque", "virement", "btt_total", "btt_cumul"]
-                                for nc in num_cols:
-                                    if nc in df_user_data.columns:
-                                        df_user_data[nc] = pd.to_numeric(df_user_data[nc], errors='coerce')
-
-                                # Clean records explicitly for JSON compliance
+                                # Clean records explicitly for JSON compliance and type safety
                                 raw_records = df_user_data.to_dict(orient="records")
                                 records = [clean_record_for_json(r) for r in raw_records]
 
